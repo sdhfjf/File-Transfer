@@ -3,6 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdnjs.cloudflare.com 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src *; media-src 'self' blob:;">
     <title>Easy WebRTC File Transfer</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.4.7/peerjs.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
@@ -385,7 +386,19 @@
 
         // Initialize PeerJS
         function initializePeer() {
-            peer = new Peer();
+            peer = new Peer({
+                // Configuration for better compatibility when hosted
+                config: {
+                    'iceServers': [
+                        { urls: 'stun:stun.l.google.com:19302' },
+                        { urls: 'stun:stun1.l.google.com:19302' },
+                        { urls: 'stun:stun2.l.google.com:19302' },
+                        { urls: 'stun:stun3.l.google.com:19302' },
+                        { urls: 'stun:stun4.l.google.com:19302' }
+                    ]
+                },
+                debug: 2 // Set to 0 for production
+            });
             
             peer.on('open', (id) => {
                 myPeerId = id;
@@ -400,11 +413,23 @@
             
             peer.on('error', (err) => {
                 console.error('PeerJS error:', err);
-                updateStatus('Connection error', 'status-disconnected');
+                updateStatus('Connection error: ' + err.type, 'status-disconnected');
+                
+                // Specific error handling
+                if (err.type === 'peer-unavailable') {
+                    updateStatus('Peer not found. Check the connection code.', 'status-disconnected');
+                } else if (err.type === 'network' || err.type === 'disconnected') {
+                    updateStatus('Network issue. Check your internet connection.', 'status-disconnected');
+                    // Try to reconnect
+                    setTimeout(() => {
+                        if (peer.destroyed) {
+                            initializePeer();
+                        }
+                    }, 2000);
+                }
             });
         }
 
-        // Setup connection
         function setupConnection() {
             updateStatus('Connected', 'status-connected');
             connectionContainer.classList.add('hidden');
@@ -420,8 +445,19 @@
             
             connection.on('error', (err) => {
                 console.error('Connection error:', err);
-                updateStatus('Connection error', 'status-disconnected');
+                updateStatus('Connection error: ' + err, 'status-disconnected');
             });
+            
+            // Send a test message to confirm connection
+            setTimeout(() => {
+                try {
+                    if (connection && connection.open) {
+                        connection.send('connection-test');
+                    }
+                } catch (e) {
+                    console.error('Failed to send test message:', e);
+                }
+            }, 1000);
         }
 
         // Handle received data (messages or files)
@@ -429,6 +465,9 @@
         
         function handleReceivedData(data) {
             if (typeof data === 'string') {
+                // Skip internal test messages
+                if (data === 'connection-test') return;
+                
                 // Handle chat message
                 addMessage(data, false);
             } else if (data.type === 'file-start') {
@@ -438,7 +477,8 @@
                     fileName: data.fileName,
                     fileSize: data.fileSize,
                     receivedChunks: [],
-                    receivedSize: 0
+                    receivedSize: 0,
+                    startTime: Date.now()
                 };
                 
                 // Create UI for incoming file
@@ -694,21 +734,41 @@
             scannerContainer.classList.remove('hidden');
             scanQrBtn.disabled = true;
             
+            // Check if the browser supports getUserMedia/camera API
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                alert('Your browser does not support camera access. Please use a modern browser or enter the code manually.');
+                stopQrScanner();
+                return;
+            }
+            
             // Request camera access
-            navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
-                .then(stream => {
-                    videoStream = stream;
-                    qrVideo.srcObject = stream;
-                    qrVideo.play();
-                    
-                    // Start scanning
-                    scanQrCode();
-                })
-                .catch(err => {
-                    console.error('Camera access error:', err);
-                    alert('Could not access the camera. Please make sure you have granted camera permissions.');
-                    stopQrScanner();
-                });
+            navigator.mediaDevices.getUserMedia({ 
+                video: { 
+                    facingMode: "environment",
+                    width: { ideal: 1280 },
+                    height: { ideal: 720 }
+                } 
+            })
+            .then(stream => {
+                videoStream = stream;
+                qrVideo.srcObject = stream;
+                qrVideo.setAttribute('playsinline', true); // required for iOS
+                qrVideo.play()
+                    .then(() => {
+                        // Start scanning
+                        scanQrCode();
+                    })
+                    .catch(err => {
+                        console.error('Failed to play video:', err);
+                        alert('Could not start video stream. Please try again.');
+                        stopQrScanner();
+                    });
+            })
+            .catch(err => {
+                console.error('Camera access error:', err);
+                alert('Could not access the camera. Please make sure you have granted camera permissions.');
+                stopQrScanner();
+            });
         }
         
         function stopQrScanner() {
@@ -773,16 +833,49 @@
         function connectToPeer(peerCode) {
             updateStatus('Connecting...', 'status-connecting');
             connectedPeerId = peerCode;
-            connection = peer.connect(peerCode);
             
-            connection.on('open', () => {
-                setupConnection();
-            });
-            
-            connection.on('error', (err) => {
-                console.error('Connection error:', err);
-                updateStatus('Connection failed', 'status-disconnected');
-            });
+            // Try to destroy existing peer if in bad state
+            if (peer && (peer.disconnected || peer.destroyed)) {
+                peer.destroy();
+                peer = null;
+                setTimeout(() => {
+                    initializePeer();
+                    setTimeout(() => attemptConnection(peerCode), 1000);
+                }, 500);
+            } else {
+                attemptConnection(peerCode);
+            }
+        }
+        
+        function attemptConnection(peerCode) {
+            try {
+                connection = peer.connect(peerCode, {
+                    reliable: true,
+                    serialization: 'binary',
+                    metadata: { sender: myPeerId }
+                });
+                
+                // Handle timeout for connection attempts
+                const connectionTimeout = setTimeout(() => {
+                    if (connection && !connection.open) {
+                        updateStatus('Connection timed out. Try again.', 'status-disconnected');
+                    }
+                }, 10000);
+                
+                connection.on('open', () => {
+                    clearTimeout(connectionTimeout);
+                    setupConnection();
+                });
+                
+                connection.on('error', (err) => {
+                    clearTimeout(connectionTimeout);
+                    console.error('Connection error:', err);
+                    updateStatus('Connection failed', 'status-disconnected');
+                });
+            } catch (err) {
+                console.error('Failed to create connection:', err);
+                updateStatus('Failed to create connection', 'status-disconnected');
+            }
         }
 
         chatInput.addEventListener('keypress', (e) => {
@@ -815,11 +908,37 @@
             chatInput.value = '';
         });
         // Initialize
-        if (window.location.hash) {
-            // Handle connection via URL hash
-            const peerCode = window.location.hash.substring(1);
-            if (peerCode) {
-                peerCodeInput.value = peerCode;
-                setTimeout(() => connectBtn.click(), 1000);
+        window.addEventListener('load', () => {
+            // Initialize PeerJS on page load to avoid issues
+            initializePeer();
+            
+            // Check for URL parameters
+            const urlParams = new URLSearchParams(window.location.search);
+            const peerIdParam = urlParams.get('connect');
+            
+            if (peerIdParam) {
+                peerCodeInput.value = peerIdParam;
+                // Wait a bit to make sure PeerJS is initialized
+                setTimeout(() => connectBtn.click(), 1500);
+            } else if (window.location.hash) {
+                // Handle connection via URL hash (fallback)
+                const peerCode = window.location.hash.substring(1);
+                if (peerCode) {
+                    peerCodeInput.value = peerCode;
+                    setTimeout(() => connectBtn.click(), 1500);
+                }
             }
-        }
+            
+            // Report any browser compatibility issues
+            const compatibilityNotes = [];
+            if (!window.RTCPeerConnection) {
+                compatibilityNotes.push("WebRTC is not supported in your browser.");
+            }
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                compatibilityNotes.push("Camera access is not supported in your browser.");
+            }
+            
+            if (compatibilityNotes.length > 0) {
+                updateStatus('Compatibility issues detected: ' + compatibilityNotes.join(' '), 'status-disconnected');
+            }
+        });
