@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>WebRTC File Transfer</title>
+  <style>
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      background: #f0f2f5;
+      margin: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+    }
+
+    h1 {
+      margin-bottom: 0.5em;
+      color: #333;
+    }
+
+    .container {
+      background: white;
+      padding: 2em;
+      border-radius: 12px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.1);
+      width: 90%;
+      max-width: 500px;
+      text-align: center;
+    }
+
+    .dropzone {
+      border: 2px dashed #4A90E2;
+      border-radius: 10px;
+      padding: 2em;
+      margin-bottom: 1em;
+      cursor: pointer;
+      transition: background 0.3s;
+    }
+
+    .dropzone:hover {
+      background: #f0faff;
+    }
+
+    input[type=file] {
+      display: none;
+    }
+
+    #qrCanvas {
+      margin-top: 1em;
+    }
+
+    textarea {
+      width: 100%;
+      height: 100px;
+      margin: 1em 0;
+      font-family: monospace;
+      resize: none;
+    }
+
+    button {
+      background-color: #4A90E2;
+      color: white;
+      border: none;
+      padding: 0.75em 1.5em;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 1em;
+      transition: background 0.3s;
+    }
+
+    button:hover {
+      background-color: #357ABD;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>📁 WebRTC File Transfer</h1>
+    <div class="dropzone" id="dropzone">Drop file here or click to select</div>
+    <input type="file" id="fileInput">
+    <button id="createOffer">📤 Create Offer</button>
+    <button id="createAnswer">📥 Create Answer</button>
+    <textarea id="signalData" placeholder="Signal data will appear here..."></textarea>
+    <button id="setSignal">✅ Set Remote Signal</button>
+    <canvas id="qrCanvas"></canvas>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/qrious@4.0.2/dist/qrious.min.js"></script>
+  <script>
+    const dropzone = document.getElementById("dropzone");
+    const fileInput = document.getElementById("fileInput");
+    const signalData = document.getElementById("signalData");
+    const createOfferBtn = document.getElementById("createOffer");
+    const createAnswerBtn = document.getElementById("createAnswer");
+    const setSignalBtn = document.getElementById("setSignal");
+    const qrCanvas = document.getElementById("qrCanvas");
+
+    let pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
+    let dc;
+    let fileBuffer = [];
+    let fileSize = 0, receivedSize = 0;
+
+    function downloadFile(fileName, data) {
+      const blob = new Blob([data]);
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = fileName;
+      a.click();
+    }
+
+    function createQR(text) {
+      const qr = new QRious({
+        element: qrCanvas,
+        value: text,
+        size: 200,
+      });
+    }
+
+    function handleFile(file) {
+      dc = pc.createDataChannel("file");
+      dc.binaryType = "arraybuffer";
+      dc.onopen = () => {
+        dc.send(JSON.stringify({ fileName: file.name, fileSize: file.size }));
+        const chunkSize = 16384;
+        let offset = 0;
+        const reader = new FileReader();
+
+        reader.onload = e => {
+          while (offset < file.size) {
+            const slice = file.slice(offset, offset + chunkSize);
+            reader.readAsArrayBuffer(slice);
+            offset += chunkSize;
+          }
+        };
+
+        reader.onloadend = e => {
+          if (e.target.readyState === FileReader.DONE) {
+            dc.send(e.target.result);
+          }
+        };
+
+        reader.readAsArrayBuffer(file.slice(0, chunkSize));
+      };
+    }
+
+    pc.ondatachannel = event => {
+      dc = event.channel;
+      dc.binaryType = "arraybuffer";
+
+      let metadata;
+
+      dc.onmessage = event => {
+        if (typeof event.data === "string") {
+          metadata = JSON.parse(event.data);
+          fileSize = metadata.fileSize;
+          fileBuffer = [];
+          receivedSize = 0;
+        } else {
+          fileBuffer.push(event.data);
+          receivedSize += event.data.byteLength;
+
+          if (receivedSize >= fileSize) {
+            const received = new Blob(fileBuffer);
+            downloadFile(metadata.fileName, received);
+          }
+        }
+      };
+    };
+
+    createOfferBtn.onclick = async () => {
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      signalData.value = JSON.stringify(pc.localDescription);
+      createQR(signalData.value);
+    };
+
+    createAnswerBtn.onclick = async () => {
+      const offer = JSON.parse(signalData.value);
+      await pc.setRemoteDescription(new RTCSessionDescription(offer));
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      signalData.value = JSON.stringify(pc.localDescription);
+      createQR(signalData.value);
+    };
+
+    setSignalBtn.onclick = async () => {
+      const desc = JSON.parse(signalData.value);
+      await pc.setRemoteDescription(new RTCSessionDescription(desc));
+    };
+
+    dropzone.addEventListener("click", () => fileInput.click());
+
+    dropzone.addEventListener("dragover", e => {
+      e.preventDefault();
+      dropzone.style.background = "#e0f7ff";
+    });
+
+    dropzone.addEventListener("dragleave", e => {
+      e.preventDefault();
+      dropzone.style.background = "";
+    });
+
+    dropzone.addEventListener("drop", e => {
+      e.preventDefault();
+      dropzone.style.background = "";
+      const file = e.dataTransfer.files[0];
+      handleFile(file);
+    });
+
+    fileInput.addEventListener("change", () => {
+      const file = fileInput.files[0];
+      handleFile(file);
+    });
+
+    pc.onicecandidate = event => {
+      if (event.candidate) return;
+      signalData.value = JSON.stringify(pc.localDescription);
+      createQR(signalData.value);
+    };
+  </script>
+</body>
+</html>
