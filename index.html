@@ -1,234 +1,726 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>WebRTC File Share</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <style>
-    * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      font-family: 'Segoe UI', sans-serif;
-      background: #f7f9fc;
-      color: #333;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: start;
-      padding: 2em;
-    }
-    h1 { margin-bottom: 0.3em; }
-    .box {
-      background: white;
-      padding: 2em;
-      border-radius: 12px;
-      box-shadow: 0 4px 20px rgba(0,0,0,0.1);
-      width: 100%;
-      max-width: 500px;
-      text-align: center;
-    }
-    .dropzone {
-      border: 2px dashed #4A90E2;
-      border-radius: 10px;
-      padding: 2em;
-      margin-top: 1em;
-      transition: background 0.3s;
-      cursor: pointer;
-    }
-    .dropzone:hover {
-      background: #eef6ff;
-    }
-    input[type="file"] { display: none; }
-    #qrCanvas {
-      margin: 1em auto;
-    }
-    input, button {
-      font-size: 1em;
-      padding: 0.7em;
-      margin: 0.5em 0;
-      border: 1px solid #ccc;
-      border-radius: 8px;
-      width: 100%;
-      max-width: 300px;
-    }
-    button {
-      background-color: #4A90E2;
-      color: white;
-      border: none;
-      cursor: pointer;
-      font-weight: bold;
-    }
-    button:hover {
-      background-color: #357ABD;
-    }
-    .hidden { display: none; }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Easy WebRTC File Transfer</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.4.7/peerjs.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <style>
+        :root {
+            --primary: #6366f1;
+            --primary-dark: #4f46e5;
+            --secondary: #f3f4f6;
+            --text: #1f2937;
+            --bg: #ffffff;
+            --accent: #d1d5db;
+            --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        body {
+            background-color: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 2rem;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 800px;
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+        }
+
+        h1 {
+            text-align: center;
+            margin-bottom: 1rem;
+            color: var(--primary-dark);
+        }
+
+        .card {
+            background-color: var(--bg);
+            border-radius: 0.5rem;
+            padding: 1.5rem;
+            box-shadow: var(--shadow);
+        }
+
+        .connection-container {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+
+        .connection-methods {
+            display: flex;
+            gap: 1rem;
+            flex-wrap: wrap;
+        }
+
+        .connection-method {
+            flex: 1;
+            min-width: 250px;
+            padding: 1rem;
+            border: 1px solid var(--accent);
+            border-radius: 0.5rem;
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+
+        .input-group {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        input[type="text"] {
+            padding: 0.75rem;
+            border-radius: 0.25rem;
+            border: 1px solid var(--accent);
+            font-size: 1rem;
+        }
+
+        button {
+            padding: 0.75rem 1rem;
+            border-radius: 0.25rem;
+            border: none;
+            background-color: var(--primary);
+            color: white;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+
+        button:hover {
+            background-color: var(--primary-dark);
+        }
+
+        button:disabled {
+            background-color: var(--accent);
+            cursor: not-allowed;
+        }
+
+        #qrcode {
+            display: flex;
+            justify-content: center;
+            margin-top: 1rem;
+            width: 100%;
+        }
+
+        #chat-container, #file-transfer-container {
+            display: none;
+        }
+
+        .chat-messages {
+            height: 300px;
+            border: 1px solid var(--accent);
+            border-radius: 0.25rem;
+            padding: 1rem;
+            overflow-y: auto;
+            margin-bottom: 1rem;
+        }
+
+        .message {
+            margin-bottom: 0.5rem;
+            padding: 0.5rem 1rem;
+            border-radius: 1rem;
+            max-width: 80%;
+            word-break: break-word;
+        }
+
+        .sender {
+            background-color: var(--primary);
+            color: white;
+            align-self: flex-end;
+            margin-left: auto;
+            border-bottom-right-radius: 0.25rem;
+        }
+
+        .receiver {
+            background-color: var(--secondary);
+            align-self: flex-start;
+            border-bottom-left-radius: 0.25rem;
+        }
+
+        .chat-input-container {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .chat-input-container input {
+            flex: 1;
+        }
+
+        .file-item {
+            padding: 1rem;
+            border: 1px solid var(--accent);
+            border-radius: 0.5rem;
+            margin-bottom: 1rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        .file-info {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .progress-container {
+            width: 100%;
+            background-color: var(--secondary);
+            border-radius: 0.25rem;
+            overflow: hidden;
+        }
+
+        .progress-bar {
+            height: 0.5rem;
+            background-color: var(--primary);
+            width: 0%;
+            transition: width 0.3s;
+        }
+
+        .status {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.875rem;
+            color: var(--text);
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        #status-indicator {
+            margin-top: 1rem;
+            text-align: center;
+            font-weight: 600;
+        }
+
+        .status-connecting {
+            color: #d97706;
+        }
+
+        .status-connected {
+            color: #059669;
+        }
+
+        .status-disconnected {
+            color: #dc2626;
+        }
+
+        .tabs {
+            display: flex;
+            border-bottom: 1px solid var(--accent);
+            margin-bottom: 1rem;
+        }
+
+        .tab {
+            padding: 0.75rem 1rem;
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+        }
+
+        .tab.active {
+            border-bottom: 2px solid var(--primary);
+            color: var(--primary);
+            font-weight: 600;
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        .file-list {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+    </style>
 </head>
 <body>
-  <div class="box">
-    <h1>📤 WebRTC File Share</h1>
+    <div class="container">
+        <h1>Easy WebRTC File Transfer</h1>
 
-    <div id="senderView">
-      <div class="dropzone" id="dropzone">Drop file here or click</div>
-      <input type="file" id="fileInput">
-      <p><strong>Share this code:</strong></p>
-      <input id="pairCode" readonly>
-      <canvas id="qrCanvas"></canvas>
+        <div id="connection-container" class="card connection-container">
+            <h2>Connect with someone</h2>
+            <div class="connection-methods">
+                <div class="connection-method">
+                    <h3>Generate a connection code</h3>
+                    <p>Generate a code and share it with the person you want to connect with.</p>
+                    <button id="generate-code-btn">Generate Code</button>
+                    <div id="my-connection-code" class="input-group hidden">
+                        <label for="my-code">Your connection code:</label>
+                        <input type="text" id="my-code" readonly>
+                        <button id="copy-code-btn">Copy Code</button>
+                        <div id="qrcode"></div>
+                    </div>
+                </div>
+                <div class="connection-method">
+                    <h3>Enter a connection code</h3>
+                    <p>Enter the code shared with you to establish a connection.</p>
+                    <div class="input-group">
+                        <label for="peer-code">Connection code:</label>
+                        <input type="text" id="peer-code" placeholder="Enter connection code">
+                        <button id="connect-btn">Connect</button>
+                    </div>
+                </div>
+            </div>
+            <div id="status-indicator"></div>
+        </div>
+
+        <div id="communication-container" class="card hidden">
+            <div class="tabs">
+                <div class="tab active" data-tab="chat">Chat</div>
+                <div class="tab" data-tab="files">Files</div>
+            </div>
+
+            <div id="chat-tab" class="tab-content active">
+                <div class="chat-messages" id="chat-messages"></div>
+                <div class="chat-input-container">
+                    <input type="text" id="chat-input" placeholder="Type a message...">
+                    <button id="send-message-btn">Send</button>
+                </div>
+            </div>
+
+            <div id="files-tab" class="tab-content">
+                <div class="input-group">
+                    <label for="file-input">Select files to send:</label>
+                    <input type="file" id="file-input" multiple>
+                    <button id="send-file-btn" disabled>Send Files</button>
+                </div>
+                <h3>File Transfers</h3>
+                <div id="file-list" class="file-list"></div>
+            </div>
+        </div>
     </div>
 
-    <div id="receiverView" class="hidden">
-      <input id="codeInput" placeholder="Enter pairing code">
-      <button id="joinBtn">Join</button>
-    </div>
+    <script>
+        // DOM Elements
+        const generateCodeBtn = document.getElementById('generate-code-btn');
+        const myConnectionCodeDiv = document.getElementById('my-connection-code');
+        const myCodeInput = document.getElementById('my-code');
+        const copyCodeBtn = document.getElementById('copy-code-btn');
+        const peerCodeInput = document.getElementById('peer-code');
+        const connectBtn = document.getElementById('connect-btn');
+        const statusIndicator = document.getElementById('status-indicator');
+        const connectionContainer = document.getElementById('connection-container');
+        const communicationContainer = document.getElementById('communication-container');
+        const chatMessages = document.getElementById('chat-messages');
+        const chatInput = document.getElementById('chat-input');
+        const sendMessageBtn = document.getElementById('send-message-btn');
+        const fileInput = document.getElementById('file-input');
+        const sendFileBtn = document.getElementById('send-file-btn');
+        const fileList = document.getElementById('file-list');
+        const tabs = document.querySelectorAll('.tab');
+        const tabContents = document.querySelectorAll('.tab-content');
 
-    <div id="modeButtons">
-      <button onclick="startSender()">📤 Send a File</button>
-      <button onclick="startReceiver()">📥 Receive a File</button>
-    </div>
-  </div>
+        // Variables
+        let peer;
+        let connection;
+        let myPeerId;
+        let connectedPeerId;
+        let qrCode;
+        
+        // Set up tabs
+        tabs.forEach(tab => {
+            tab.addEventListener('click', () => {
+                // Remove active class from all tabs and contents
+                tabs.forEach(t => t.classList.remove('active'));
+                tabContents.forEach(c => c.classList.remove('active'));
+                
+                // Add active class to clicked tab and corresponding content
+                tab.classList.add('active');
+                const tabContent = document.getElementById(`${tab.dataset.tab}-tab`);
+                if (tabContent) {
+                    tabContent.classList.add('active');
+                }
+            });
+        });
 
-  <script src="https://cdn.jsdelivr.net/npm/qrious@4.0.2/dist/qrious.min.js"></script>
-  <script>
-    const pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
-    let dc;
-    let localPairCode = generateCode();
-    const connections = {};
-
-    const dropzone = document.getElementById('dropzone');
-    const fileInput = document.getElementById('fileInput');
-    const qrCanvas = document.getElementById('qrCanvas');
-    const pairCodeInput = document.getElementById('pairCode');
-    const codeInput = document.getElementById('codeInput');
-    const joinBtn = document.getElementById('joinBtn');
-    const senderView = document.getElementById('senderView');
-    const receiverView = document.getElementById('receiverView');
-    const modeButtons = document.getElementById('modeButtons');
-
-    function generateCode() {
-      return Math.floor(100000 + Math.random() * 900000).toString();
-    }
-
-    function createQR(text) {
-      new QRious({
-        element: qrCanvas,
-        value: location.href + "?code=" + text,
-        size: 200
-      });
-    }
-
-    function startSender() {
-      senderView.classList.remove('hidden');
-      receiverView.classList.add('hidden');
-      modeButtons.classList.add('hidden');
-      pairCodeInput.value = localPairCode;
-      createQR(localPairCode);
-    }
-
-    function startReceiver() {
-      senderView.classList.add('hidden');
-      receiverView.classList.remove('hidden');
-      modeButtons.classList.add('hidden');
-    }
-
-    dropzone.addEventListener('click', () => fileInput.click());
-    dropzone.addEventListener('dragover', e => {
-      e.preventDefault();
-      dropzone.style.background = "#e6f0ff";
-    });
-    dropzone.addEventListener('dragleave', e => {
-      e.preventDefault();
-      dropzone.style.background = "";
-    });
-    dropzone.addEventListener('drop', e => {
-      e.preventDefault();
-      dropzone.style.background = "";
-      const file = e.dataTransfer.files[0];
-      handleFileSend(file);
-    });
-    fileInput.addEventListener('change', () => {
-      const file = fileInput.files[0];
-      handleFileSend(file);
-    });
-
-    async function handleFileSend(file) {
-      dc = pc.createDataChannel("file");
-      dc.binaryType = "arraybuffer";
-      dc.onopen = () => {
-        dc.send(JSON.stringify({ name: file.name, size: file.size }));
-        sendFileChunks(file);
-      };
-
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-
-      // Store connection offer in memory (simulate signaling server)
-      connections[localPairCode] = offer;
-    }
-
-    async function sendFileChunks(file) {
-      const chunkSize = 16384;
-      let offset = 0;
-
-      while (offset < file.size) {
-        const slice = file.slice(offset, offset + chunkSize);
-        const arrayBuffer = await slice.arrayBuffer();
-        dc.send(arrayBuffer);
-        offset += chunkSize;
-      }
-    }
-
-    pc.ondatachannel = event => {
-      const dc = event.channel;
-      let fileInfo, fileBuffer = [], received = 0;
-
-      dc.onmessage = e => {
-        if (typeof e.data === "string") {
-          fileInfo = JSON.parse(e.data);
-        } else {
-          fileBuffer.push(e.data);
-          received += e.data.byteLength;
-
-          if (received >= fileInfo.size) {
-            const blob = new Blob(fileBuffer);
-            const a = document.createElement("a");
-            a.href = URL.createObjectURL(blob);
-            a.download = fileInfo.name;
-            a.click();
-          }
+        // Initialize PeerJS
+        function initializePeer() {
+            peer = new Peer();
+            
+            peer.on('open', (id) => {
+                myPeerId = id;
+                updateStatus('Ready to connect', '');
+            });
+            
+            peer.on('connection', (conn) => {
+                connection = conn;
+                connectedPeerId = connection.peer;
+                setupConnection();
+            });
+            
+            peer.on('error', (err) => {
+                console.error('PeerJS error:', err);
+                updateStatus('Connection error', 'status-disconnected');
+            });
         }
-      };
-    };
 
-    joinBtn.onclick = async () => {
-      const code = codeInput.value.trim();
-      const offer = connections[code];
-      if (!offer) {
-        alert("Invalid or expired code.");
-        return;
-      }
-
-      await pc.setRemoteDescription(new RTCSessionDescription(offer));
-      const answer = await pc.createAnswer();
-      await pc.setLocalDescription(answer);
-    };
-
-    pc.onicecandidate = e => {
-      if (!e.candidate) {
-        const desc = pc.localDescription;
-        // simulate sending localDescription to receiver (in-memory)
-        if (desc && desc.type === "answer") {
-          // In-memory simulation; normally you'd send over server
+        // Setup connection
+        function setupConnection() {
+            updateStatus('Connected', 'status-connected');
+            connectionContainer.classList.add('hidden');
+            communicationContainer.classList.remove('hidden');
+            
+            connection.on('data', handleReceivedData);
+            
+            connection.on('close', () => {
+                updateStatus('Disconnected', 'status-disconnected');
+                connectionContainer.classList.remove('hidden');
+                communicationContainer.classList.add('hidden');
+            });
+            
+            connection.on('error', (err) => {
+                console.error('Connection error:', err);
+                updateStatus('Connection error', 'status-disconnected');
+            });
         }
-      }
-    };
 
-    // Auto-load from QR if ?code= is present
-    const urlParams = new URLSearchParams(location.search);
-    const autoCode = urlParams.get("code");
-    if (autoCode) {
-      startReceiver();
-      codeInput.value = autoCode;
-    }
-  </script>
+        // Handle received data (messages or files)
+        let filesInProgress = {};
+        
+        function handleReceivedData(data) {
+            if (typeof data === 'string') {
+                // Handle chat message
+                addMessage(data, false);
+            } else if (data.type === 'file-start') {
+                // File transfer starting
+                const fileId = data.fileId;
+                filesInProgress[fileId] = {
+                    fileName: data.fileName,
+                    fileSize: data.fileSize,
+                    receivedChunks: [],
+                    receivedSize: 0
+                };
+                
+                // Create UI for incoming file
+                createFileTransferUI(fileId, data.fileName, data.fileSize, 'download');
+            } else if (data.type === 'file-chunk') {
+                // File chunk received
+                const fileInfo = filesInProgress[data.fileId];
+                if (fileInfo) {
+                    fileInfo.receivedChunks.push(data.chunk);
+                    fileInfo.receivedSize += data.chunk.byteLength;
+                    
+                    // Update progress UI
+                    updateFileProgress(data.fileId, fileInfo.receivedSize, fileInfo.fileSize);
+                }
+            } else if (data.type === 'file-end') {
+                // File transfer completed
+                const fileInfo = filesInProgress[data.fileId];
+                if (fileInfo) {
+                    finishFileReceive(data.fileId, fileInfo);
+                }
+            }
+        }
+
+        // Format file size
+        function formatFileSize(bytes) {
+            if (bytes < 1024) return bytes + ' B';
+            else if (bytes < 1048576) return (bytes / 1024).toFixed(2) + ' KB';
+            else if (bytes < 1073741824) return (bytes / 1048576).toFixed(2) + ' MB';
+            else return (bytes / 1073741824).toFixed(2) + ' GB';
+        }
+
+        // Calculate estimated time remaining
+        function calculateETA(startTime, progress) {
+            if (progress <= 0) return 'calculating...';
+            
+            const elapsedMs = Date.now() - startTime;
+            const estimatedTotalMs = elapsedMs / progress;
+            const remainingMs = estimatedTotalMs - elapsedMs;
+            
+            if (remainingMs < 1000) return 'less than 1 second';
+            if (remainingMs < 60000) return Math.ceil(remainingMs / 1000) + ' seconds';
+            return Math.ceil(remainingMs / 60000) + ' minutes';
+        }
+
+        // Create file transfer UI
+        function createFileTransferUI(fileId, fileName, fileSize, type) {
+            const fileItem = document.createElement('div');
+            fileItem.className = 'file-item';
+            fileItem.id = `file-${fileId}`;
+            
+            fileItem.innerHTML = `
+                <div class="file-info">
+                    <div>
+                        <strong>${fileName}</strong>
+                        <div>(${formatFileSize(fileSize)})</div>
+                    </div>
+                    <div>${type === 'upload' ? 'Sending' : 'Receiving'}</div>
+                </div>
+                <div class="progress-container">
+                    <div class="progress-bar" id="progress-${fileId}"></div>
+                </div>
+                <div class="status">
+                    <span class="progress-text" id="progress-text-${fileId}">0%</span>
+                    <span class="eta" id="eta-${fileId}">calculating...</span>
+                </div>
+                <div id="file-actions-${fileId}" class="hidden">
+                    ${type === 'download' ? '<a href="#" class="download-link" id="download-${fileId}">Download File</a>' : ''}
+                </div>
+            `;
+            
+            fileList.appendChild(fileItem);
+            return fileItem;
+        }
+
+        // Update file progress
+        function updateFileProgress(fileId, current, total) {
+            const progressBar = document.getElementById(`progress-${fileId}`);
+            const progressText = document.getElementById(`progress-text-${fileId}`);
+            const etaElement = document.getElementById(`eta-${fileId}`);
+            
+            const progress = Math.min(Math.floor((current / total) * 100), 100);
+            
+            progressBar.style.width = `${progress}%`;
+            progressText.textContent = `${progress}% (${formatFileSize(current)} / ${formatFileSize(total)})`;
+            
+            // Update ETA if we have a start time
+            const transferInfo = filesInProgress[fileId] || fileSending[fileId];
+            if (transferInfo && transferInfo.startTime) {
+                const progressRatio = current / total;
+                etaElement.textContent = progressRatio < 1 ? 
+                    `ETA: ${calculateETA(transferInfo.startTime, progressRatio)}` : 
+                    'Completed';
+            }
+        }
+
+        // Finish file receive
+        function finishFileReceive(fileId, fileInfo) {
+            // Combine chunks into a single blob
+            const blob = new Blob(fileInfo.receivedChunks);
+            
+            // Update UI
+            updateFileProgress(fileId, fileInfo.fileSize, fileInfo.fileSize);
+            
+            // Enable download button
+            const downloadLink = document.getElementById(`download-${fileId}`);
+            const actionsDiv = document.getElementById(`file-actions-${fileId}`);
+            
+            if (downloadLink && actionsDiv) {
+                const url = URL.createObjectURL(blob);
+                downloadLink.href = url;
+                downloadLink.download = fileInfo.fileName;
+                actionsDiv.classList.remove('hidden');
+                
+                downloadLink.addEventListener('click', () => {
+                    setTimeout(() => {
+                        URL.revokeObjectURL(url);
+                    }, 100);
+                });
+            }
+            
+            // Clean up
+            delete filesInProgress[fileId];
+        }
+
+        // File sending logic
+        let fileSending = {};
+        const CHUNK_SIZE = 16384; // 16KB chunks
+
+        function sendFile(file) {
+            const fileId = Date.now().toString();
+            const reader = new FileReader();
+            
+            // Create UI for the file being sent
+            createFileTransferUI(fileId, file.name, file.size, 'upload');
+            
+            fileSending[fileId] = {
+                fileName: file.name,
+                fileSize: file.size,
+                sentSize: 0,
+                startTime: Date.now()
+            };
+            
+            // Notify peer that we're starting a file transfer
+            connection.send({
+                type: 'file-start',
+                fileId: fileId,
+                fileName: file.name,
+                fileSize: file.size
+            });
+            
+            reader.onload = function(e) {
+                // Process and send the file in chunks
+                const fileData = e.target.result;
+                let offset = 0;
+                
+                function sendChunk() {
+                    if (offset < fileData.byteLength) {
+                        const chunk = fileData.slice(offset, offset + CHUNK_SIZE);
+                        offset += chunk.byteLength;
+                        
+                        connection.send({
+                            type: 'file-chunk',
+                            fileId: fileId,
+                            chunk: chunk
+                        });
+                        
+                        // Update progress
+                        fileSending[fileId].sentSize = offset;
+                        updateFileProgress(fileId, offset, file.size);
+                        
+                        // Schedule next chunk
+                        setTimeout(sendChunk, 0);
+                    } else {
+                        // All chunks sent, finalize transfer
+                        connection.send({
+                            type: 'file-end',
+                            fileId: fileId
+                        });
+                        
+                        // Clean up
+                        delete fileSending[fileId];
+                    }
+                }
+                
+                // Start sending chunks
+                sendChunk();
+            };
+            
+            // Start reading the file
+            reader.readAsArrayBuffer(file);
+        }
+
+        // Add message to chat
+        function addMessage(text, isSender) {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${isSender ? 'sender' : 'receiver'}`;
+            messageDiv.textContent = text;
+            chatMessages.appendChild(messageDiv);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+
+        // Update status indicator
+        function updateStatus(message, className) {
+            statusIndicator.textContent = message;
+            statusIndicator.className = className;
+        }
+
+        // Event Listeners
+        generateCodeBtn.addEventListener('click', () => {
+            if (!peer) {
+                initializePeer();
+            }
+            
+            setTimeout(() => {
+                if (myPeerId) {
+                    myCodeInput.value = myPeerId;
+                    myConnectionCodeDiv.classList.remove('hidden');
+                    
+                    // Generate QR code
+                    if (!qrCode) {
+                        qrCode = new QRCode(document.getElementById('qrcode'), {
+                            text: myPeerId,
+                            width: 128,
+                            height: 128
+                        });
+                    } else {
+                        qrCode.clear();
+                        qrCode.makeCode(myPeerId);
+                    }
+                } else {
+                    updateStatus('Waiting for connection...', 'status-connecting');
+                    setTimeout(() => generateCodeBtn.click(), 1000);
+                }
+            }, 500);
+        });
+
+        copyCodeBtn.addEventListener('click', () => {
+            myCodeInput.select();
+            document.execCommand('copy');
+            copyCodeBtn.textContent = 'Copied!';
+            setTimeout(() => {
+                copyCodeBtn.textContent = 'Copy Code';
+            }, 2000);
+        });
+
+        connectBtn.addEventListener('click', () => {
+            const peerCode = peerCodeInput.value.trim();
+            if (!peerCode) return;
+            
+            if (!peer) {
+                initializePeer();
+                setTimeout(() => connectToPeer(peerCode), 1000);
+            } else {
+                connectToPeer(peerCode);
+            }
+        });
+
+        function connectToPeer(peerCode) {
+            updateStatus('Connecting...', 'status-connecting');
+            connectedPeerId = peerCode;
+            connection = peer.connect(peerCode);
+            
+            connection.on('open', () => {
+                setupConnection();
+            });
+            
+            connection.on('error', (err) => {
+                console.error('Connection error:', err);
+                updateStatus('Connection failed', 'status-disconnected');
+            });
+        }
+
+        sendMessageBtn.addEventListener('click', () => {
+            const message = chatInput.value.trim();
+            if (!message || !connection) return;
+            
+            connection.send(message);
+            addMessage(message, true);
+            chatInput.value = '';
+        });
+
+        chatInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                sendMessageBtn.click();
+            }
+        });
+
+        fileInput.addEventListener('change', () => {
+            sendFileBtn.disabled = fileInput.files.length === 0;
+        });
+
+        sendFileBtn.addEventListener('click', () => {
+            if (!connection || fileInput.files.length === 0) return;
+            
+            Array.from(fileInput.files).forEach(file => {
+                sendFile(file);
+            });
+            
+            fileInput.value = '';
+            sendFileBtn.disabled = true;
+        });
+
+        // Initialize
+        if (window.location.hash) {
+            // Handle connection via URL hash
+            const peerCode = window.location.hash.substring(1);
+            if (peerCode) {
+                peerCodeInput.value = peerCode;
+                setTimeout(() => connectBtn.click(), 1000);
+            }
+        }
+    </script>
 </body>
 </html>
